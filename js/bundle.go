@@ -30,7 +30,6 @@ import (
 	"runtime"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja/parser"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"gopkg.in/guregu/null.v3"
@@ -81,7 +80,13 @@ func NewBundle(
 	// Compile sources, both ES5 and ES6 are supported.
 	code := string(src.Data)
 	c := compiler.New(logger)
-	pgm, _, err := c.Compile(code, src.URL.String(), "", "", true, compatMode)
+	c.COpts = compiler.CompilerOptions{
+		CompatibilityMode: compatMode,
+		Strict:            true,
+		SourceMapEnabled:  true,
+		SourceMapLoader:   generateSourceMapLoader(logger, filesystems),
+	}
+	pgm, _, err := c.Compile(code, src.URL.String(), true, c.COpts)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +131,13 @@ func NewBundleFromArchive(logger logrus.FieldLogger, arc *lib.Archive, rtOpts li
 	}
 
 	c := compiler.New(logger)
-	pgm, _, err := c.Compile(string(arc.Data), arc.FilenameURL.String(), "", "", true, compatMode)
+	c.COpts = compiler.CompilerOptions{
+		Strict:            true,
+		CompatibilityMode: compatMode,
+		SourceMapEnabled:  true,
+		SourceMapLoader:   generateSourceMapLoader(logger, arc.Filesystems),
+	}
+	pgm, _, err := c.Compile(string(arc.Data), arc.FilenameURL.String(), true, c.COpts)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +295,6 @@ func (b *Bundle) Instantiate(logger logrus.FieldLogger, vuID uint64) (bi *Bundle
 // Instantiates the bundle into an existing runtime. Not public because it also messes with a bunch
 // of other things, will potentially thrash data and makes a mess in it if the operation fails.
 func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *InitContext, vuID uint64) error {
-	rt.SetParserOptions(parser.WithDisableSourceMaps)
 	rt.SetFieldNameMapper(common.FieldNameMapper{})
 	rt.SetRandSource(common.NewRandSource())
 
@@ -329,4 +339,19 @@ func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *
 	rt.SetRandSource(common.NewRandSource())
 
 	return nil
+}
+
+func generateSourceMapLoader(logger logrus.FieldLogger, filesystems map[string]afero.Fs,
+) func(path string) ([]byte, error) {
+	return func(path string) ([]byte, error) {
+		u, err := url.Parse(path)
+		if err != nil {
+			return nil, err
+		}
+		data, err := loader.Load(logger, filesystems, u, path)
+		if err != nil {
+			return nil, err
+		}
+		return data.Data, nil
+	}
 }

@@ -696,22 +696,20 @@ func (self *_parser) parseSourceMap() *sourcemap.Consumer {
 		} else {
 			var smUrl *url.URL
 			if smUrl, err = url.Parse(urlStr); err == nil {
-				p := smUrl.Path
-				if !path.IsAbs(p) {
+				if !smUrl.IsAbs() { // if it has scheme there is nothing to do
 					baseName := self.file.Name()
 					baseUrl, err1 := url.Parse(baseName)
 					if err1 == nil && baseUrl.Scheme != "" {
-						baseUrl.Path = path.Join(path.Dir(baseUrl.Path), p)
-						p = baseUrl.String()
+						smUrl = baseUrl.ResolveReference(smUrl)
 					} else {
-						p = path.Join(path.Dir(baseName), p)
+						smUrl.Path = path.Join(path.Dir(baseName), smUrl.Path)
 					}
 				}
 				if self.opts.sourceMapLoader != nil {
-					data, err = self.opts.sourceMapLoader(p)
+					data, err = self.opts.sourceMapLoader(smUrl.String())
 				} else {
 					if smUrl.Scheme == "" || smUrl.Scheme == "file" {
-						data, err = ioutil.ReadFile(p)
+						data, err = ioutil.ReadFile(smUrl.Path)
 					} else {
 						err = fmt.Errorf("unsupported source map URL scheme: %s", smUrl.Scheme)
 					}

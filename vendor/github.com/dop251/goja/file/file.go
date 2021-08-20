@@ -4,6 +4,7 @@ package file
 
 import (
 	"fmt"
+	"net/url"
 	"path"
 	"sort"
 	"sync"
@@ -159,11 +160,8 @@ func (fl *File) Position(offset int) Position {
 
 	if fl.sourceMap != nil {
 		if source, _, row, col, ok := fl.sourceMap.Source(row, col); ok {
-			if !path.IsAbs(source) {
-				source = path.Join(path.Dir(fl.name), source)
-			}
 			return Position{
-				Filename: source,
+				Filename: getSourceFilename(source, fl.Name()),
 				Line:     row,
 				Column:   col,
 			}
@@ -175,6 +173,19 @@ func (fl *File) Position(offset int) Position {
 		Line:     row,
 		Column:   col,
 	}
+}
+
+func getSourceFilename(source, basename string) string {
+	// if the url is absolute(has scheme) there is nothing to do
+	if smURL, err := url.Parse(source); err == nil && !smURL.IsAbs() {
+		baseURL, err1 := url.Parse(basename)
+		if err1 == nil && path.IsAbs(baseURL.Path) {
+			source = baseURL.ResolveReference(smURL).String()
+		} else {
+			source = path.Join(path.Dir(basename), smURL.Path)
+		}
+	}
+	return source
 }
 
 func findNextLineStart(s string) int {

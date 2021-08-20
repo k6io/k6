@@ -22,12 +22,12 @@ package compiler
 
 import (
 	_ "embed" // we need this for embedding Babel
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja/parser"
-	"github.com/mitchellh/mapstructure"
 	"github.com/sirupsen/logrus"
 
 	"go.k6.io/k6/lib"
@@ -86,10 +86,13 @@ var (
 	globalBabel        *babel        // nolint:gochecknoglobals
 )
 
+const sourceMapURLFromBabel = "k6://internal-should-not-leak/file.map"
+
 // A Compiler compiles JavaScript source code (ES5.1 or ES6) into a goja.Program
 type Compiler struct {
 	logger logrus.FieldLogger
 	babel  *babel
+	COpts  CompilerOptions // TODO change this, this is just way faster
 }
 
 // New returns a new Compiler
@@ -108,7 +111,7 @@ func (c *Compiler) initializeBabel() error {
 }
 
 // Transform the given code into ES5
-func (c *Compiler) Transform(src, filename string) (code string, srcmap *SourceMap, err error) {
+func (c *Compiler) Transform(src, filename string, inputSrcMap []byte) (code string, srcmap []byte, err error) {
 	if c.babel == nil {
 		onceBabel.Do(func() {
 			globalBabel, err = newBabel()
@@ -119,48 +122,78 @@ func (c *Compiler) Transform(src, filename string) (code string, srcmap *SourceM
 		return
 	}
 
-	code, srcmap, err = c.babel.Transform(c.logger, src, filename)
+	code, srcmap, err = c.babel.transformImpl(c.logger, src, filename, c.COpts.SourceMapEnabled, inputSrcMap)
+	// fmt.Println(code)
 	return
 }
 
+// CompilerOptions are options to the compiler ;)
+type CompilerOptions struct { // TODO maybe have the fields an exported and use the functional options pattern
+	CompatibilityMode lib.CompatibilityMode
+	SourceMapEnabled  bool
+	// TODO maybe move only this in the compiler itself and leave ht rest as parameters to the Compile
+	SourceMapLoader func(string) ([]byte, error)
+	Strict          bool
+}
+
 // Compile the program in the given CompatibilityMode, wrapping it between pre and post code
-func (c *Compiler) Compile(src, filename, pre, post string,
-	strict bool, compatMode lib.CompatibilityMode) (*goja.Program, string, error) {
-	code := pre + src + post
-	ast, err := parser.ParseFile(nil, filename, code, 0, parser.WithDisableSourceMaps)
+func (c *Compiler) Compile(src, filename string, main bool, cOpts CompilerOptions) (*goja.Program, string, error) {
+	return c.compileImpl(src, filename, main, cOpts, nil)
+}
+
+func (c *Compiler) compileImpl(
+	src, filename string, main bool, cOpts CompilerOptions, srcmap []byte,
+) (*goja.Program, string, error) {
+	code := src
+	if !main {
+		if len(srcmap) != 0 {
+			var err error
+			srcmap, err = increaseMappingsByOne(srcmap)
+			if err != nil {
+				return nil, "", err
+			}
+		}
+
+		code = "(function(module, exports){\n" + code + "\n})\n"
+	}
+	opts := parser.WithDisableSourceMaps
+	var couldntLoadSourceMap bool
+	if cOpts.SourceMapEnabled {
+		opts = parser.WithSourceMapLoader(func(path string) ([]byte, error) {
+			if path == sourceMapURLFromBabel {
+				return srcmap, nil
+			}
+			var err error
+			srcmap, err = c.COpts.SourceMapLoader(path)
+			if err == nil && !main {
+				srcmap, err = increaseMappingsByOne(srcmap)
+			} else {
+				couldntLoadSourceMap = true
+			}
+			return srcmap, err
+		})
+	}
+	ast, err := parser.ParseFile(nil, filename, code, 0, opts)
+	// we probably don't want to abort scripts which have source maps but they can't be found,
+	// this also will be a breaking change, so if we couldn't we retry with it disabled
+	if couldntLoadSourceMap {
+		// original error is currently not very relevant
+		c.logger.Warnf("Couldn't load source map for %s", filename)
+		ast, err = parser.ParseFile(nil, filename, code, 0, parser.WithDisableSourceMaps)
+	}
 	if err != nil {
-		if compatMode == lib.CompatibilityModeExtended {
-			code, _, err = c.Transform(src, filename)
+		if cOpts.CompatibilityMode == lib.CompatibilityModeExtended {
+			code, srcmap, err = c.Transform(src, filename, srcmap)
 			if err != nil {
 				return nil, code, err
 			}
 			// the compatibility mode "decreases" here as we shouldn't transform twice
-			return c.Compile(code, filename, pre, post, strict, lib.CompatibilityModeBase)
+			cOpts.CompatibilityMode = lib.CompatibilityModeBase
+			return c.compileImpl(code, filename, main, cOpts, srcmap)
 		}
 		return nil, code, err
 	}
-	pgm, err := goja.CompileAST(ast, strict)
-	// Parsing only checks the syntax, not whether what the syntax expresses
-	// is actually supported (sometimes).
-	//
-	// For example, destructuring looks a lot like an object with shorthand
-	// properties, but this is only noticeable once the code is compiled, not
-	// while parsing. Even now code such as `let [x] = [2]` doesn't return an
-	// error on the parsing stage but instead in the compilation in base mode.
-	//
-	// So, because of this, if there is an error during compilation, it still might
-	// be worth it to transform the code and try again.
-	if err != nil {
-		if compatMode == lib.CompatibilityModeExtended {
-			code, _, err = c.Transform(src, filename)
-			if err != nil {
-				return nil, code, err
-			}
-			// the compatibility mode "decreases" here as we shouldn't transform twice
-			return c.Compile(code, filename, pre, post, strict, lib.CompatibilityModeBase)
-		}
-		return nil, code, err
-	}
+	pgm, err := goja.CompileAST(ast, cOpts.Strict)
 	return pgm, code, err
 }
 
@@ -194,14 +227,39 @@ func newBabel() (*babel, error) {
 	return result, err
 }
 
-// Transform the given code into ES5, while synchronizing to ensure only a single
+func increaseMappingsByOne(sourceMap []byte) ([]byte, error) {
+	var err error
+	m := make(map[string]interface{})
+	if err = json.Unmarshal(sourceMap, &m); err != nil {
+		return nil, err
+	}
+
+	// ';' is the separator between lines so just adding 1 will make all mappings be for the line after which they were
+	// originally
+	m["mappings"] = ";" + m["mappings"].(string)
+	return json.Marshal(m)
+}
+
+// transformImpl the given code into ES5, while synchronizing to ensure only a single
 // bundle instance / Goja VM is in use at a time.
-func (b *babel) Transform(logger logrus.FieldLogger, src, filename string) (string, *SourceMap, error) {
+func (b *babel) transformImpl(
+	logger logrus.FieldLogger, src, filename string, sourceMapsEnabled bool, inputSrcMap []byte,
+) (string, []byte, error) {
 	b.m.Lock()
 	defer b.m.Unlock()
 	opts := make(map[string]interface{})
 	for k, v := range DefaultOpts {
 		opts[k] = v
+	}
+	if sourceMapsEnabled {
+		opts["sourceMaps"] = true
+		if inputSrcMap != nil {
+			srcMap := new(map[string]interface{})
+			if err := json.Unmarshal(inputSrcMap, &srcMap); err != nil {
+				return "", nil, err
+			}
+			opts["inputSourceMap"] = srcMap
+		}
 	}
 	opts["filename"] = filename
 
@@ -217,15 +275,24 @@ func (b *babel) Transform(logger logrus.FieldLogger, src, filename string) (stri
 	if err = b.vm.ExportTo(vO.Get("code"), &code); err != nil {
 		return code, nil, err
 	}
-	var rawMap map[string]interface{}
-	if err = b.vm.ExportTo(vO.Get("map"), &rawMap); err != nil {
+	if !sourceMapsEnabled {
+		return code, nil, nil
+	}
+
+	// this is to make goja try to load a sourcemap.
+	// it is specifically a special url as it should never leak outside of this code
+	// additionally the alternative support from babel is to embed *the whole* sourcemap at the end
+	code += "\n//# sourceMappingURL=" + sourceMapURLFromBabel
+	stringify, err := b.vm.RunString("(function(m) { return JSON.stringify(m)})")
+	if err != nil {
 		return code, nil, err
 	}
-	var srcMap SourceMap
-	if err = mapstructure.Decode(rawMap, &srcMap); err != nil {
-		return code, &srcMap, err
+	c, _ := goja.AssertFunction(stringify)
+	mapAsJSON, err := c(goja.Undefined(), vO.Get("map"))
+	if err != nil {
+		return code, nil, err
 	}
-	return code, &srcMap, err
+	return code, []byte(mapAsJSON.String()), nil
 }
 
 // Pool is a pool of compilers so it can be used easier in parallel tests as they have their own babel.

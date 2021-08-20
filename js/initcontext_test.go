@@ -574,3 +574,69 @@ func TestInitContextVU(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), v.Export())
 }
+
+func TestSourceMaps(t *testing.T) {
+	t.Parallel()
+	logger := testutils.NewLogger(t)
+	fs := afero.NewMemMapFs()
+	assert.NoError(t, afero.WriteFile(fs, "/module1.js", []byte(`
+export function f2(){
+    throw "exception in line 2"
+    console.log("in f2")
+}
+export function f1(){
+    throw "exception in line 6"
+    console.log("in f1")
+}
+`[1:]), 0o644))
+	data := `
+import * as module1 from "./module1.js"
+
+export default function(){
+//    throw "exception in line 4"
+    module1.f2()
+    console.log("in default")
+}
+`[1:]
+	b, err := getSimpleBundle(t, "/script.js", data, fs)
+	require.NoError(t, err)
+
+	bi, err := b.Instantiate(logger, 0)
+	require.NoError(t, err)
+	_, err = bi.exports[consts.DefaultFn](goja.Undefined())
+	require.Error(t, err)
+	exception := new(goja.Exception)
+	require.ErrorAs(t, err, &exception)
+	require.Equal(t, exception.String(), "exception in line 2\n\tat f2 (file:///module1.js:2:10(2))\n\tat file:///script.js:5:4(4)\n")
+}
+
+func TestSourceMapsExternal(t *testing.T) {
+	t.Parallel()
+	logger := testutils.NewLogger(t)
+	fs := afero.NewMemMapFs()
+	// This example is created through the template-typescript
+	assert.NoError(t, afero.WriteFile(fs, "/test1.js", []byte(`
+(()=>{"use strict";var e={};(()=>{var o=e;Object.defineProperty(o,"__esModule",{value:!0}),o.default=function(){!function(e){throw"cool is cool"}()}})();var o=exports;for(var r in e)o[r]=e[r];e.__esModule&&Object.defineProperty(o,"__esModule",{value:!0})})();
+//# sourceMappingURL=test1.js.map
+`[1:]), 0o644))
+	assert.NoError(t, afero.WriteFile(fs, "/test1.js.map", []byte(`
+{"version":3,"sources":["webpack:///./test1.ts"],"names":["s","coolThrow"],"mappings":"2FAGA,sBAHA,SAAmBA,GACf,KAAM,eAGNC,K","file":"test1.js","sourcesContent":["function coolThrow(s: string) {\n    throw \"cool \"+ s\n}\nexport default () => {\n    coolThrow(\"is cool\")\n};\n"],"sourceRoot":""}
+`[1:]), 0o644))
+	data := `
+import l from "./test1.js"
+
+export default function () {
+		l()
+};
+`[1:]
+	b, err := getSimpleBundle(t, "/script.js", data, fs)
+	require.NoError(t, err)
+
+	bi, err := b.Instantiate(logger, 0)
+	require.NoError(t, err)
+	_, err = bi.exports[consts.DefaultFn](goja.Undefined())
+	require.Error(t, err)
+	exception := new(goja.Exception)
+	require.ErrorAs(t, err, &exception)
+	require.Equal(t, exception.String(), "cool is cool\n\tat webpack:///./test1.ts:2:10(2)\n\tat webpack:///./test1.ts:5:4(3)\n\tat file:///script.js:4:2(4)\n")
+}
