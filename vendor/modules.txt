@@ -17,6 +17,9 @@ github.com/andybalholm/brotli
 github.com/andybalholm/cascadia
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
+# github.com/deepmap/oapi-codegen v1.8.2
+github.com/deepmap/oapi-codegen/pkg/runtime
+github.com/deepmap/oapi-codegen/pkg/types
 # github.com/dlclark/regexp2 v1.4.1-0.20201116162257-a2a8dda75c91
 github.com/dlclark/regexp2
 github.com/dlclark/regexp2/syntax
@@ -63,11 +66,24 @@ github.com/golang/snappy
 github.com/gorilla/websocket
 # github.com/inconshreveable/mousetrap v1.0.0
 github.com/inconshreveable/mousetrap
+# github.com/influxdata/influxdb-client-go/v2 v2.5.0
+## explicit
+github.com/influxdata/influxdb-client-go/v2
+github.com/influxdata/influxdb-client-go/v2/api
+github.com/influxdata/influxdb-client-go/v2/api/http
+github.com/influxdata/influxdb-client-go/v2/api/query
+github.com/influxdata/influxdb-client-go/v2/api/write
+github.com/influxdata/influxdb-client-go/v2/domain
+github.com/influxdata/influxdb-client-go/v2/internal/gzip
+github.com/influxdata/influxdb-client-go/v2/internal/http
+github.com/influxdata/influxdb-client-go/v2/internal/log
+github.com/influxdata/influxdb-client-go/v2/internal/write
+github.com/influxdata/influxdb-client-go/v2/log
 # github.com/influxdata/influxdb1-client v0.0.0-20190402204710-8ff2fc3824fc
 ## explicit
-github.com/influxdata/influxdb1-client/models
-github.com/influxdata/influxdb1-client/pkg/escape
-github.com/influxdata/influxdb1-client/v2
+# github.com/influxdata/line-protocol v0.0.0-20210311194329-9aa0e372d097
+## explicit
+github.com/influxdata/line-protocol
 # github.com/jhump/protoreflect v1.9.0
 ## explicit
 github.com/jhump/protoreflect/codec
@@ -123,6 +139,8 @@ github.com/nu7hatch/gouuid
 # github.com/oxtoacart/bpool v0.0.0-20190530202638-03653db5a59c
 ## explicit
 github.com/oxtoacart/bpool
+# github.com/pkg/errors v0.9.1
+github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
@@ -155,13 +173,13 @@ github.com/tidwall/match
 # github.com/tidwall/pretty v1.2.0
 ## explicit
 github.com/tidwall/pretty
-# golang.org/x/crypto v0.0.0-20201016220609-9e8e0b390897
+# golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 ## explicit
 golang.org/x/crypto/md4
 golang.org/x/crypto/ocsp
 golang.org/x/crypto/ripemd160
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20210428185458-6f5299370f2b
+# golang.org/x/net v0.0.0-20210916014120-12bc252f5db8
 ## explicit
 golang.org/x/net/html
 golang.org/x/net/html/atom
@@ -170,12 +188,15 @@ golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/timeseries
+golang.org/x/net/publicsuffix
 golang.org/x/net/trace
-# golang.org/x/sys v0.0.0-20201204225414-ed752295db88
-## explicit
+# golang.org/x/sys v0.0.0-20210423082822-04245dca01da
 golang.org/x/sys/internal/unsafeheader
+golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
+# golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
+golang.org/x/term
 # golang.org/x/text v0.3.6
 golang.org/x/text/cases
 golang.org/x/text/collate
