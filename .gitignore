@@ -2,8 +2,8 @@
 /k6.exe
 /dist
 /pkg-build
-/js/tc39/TestTC39
-/js/modules/k6/experimental/streams/tests/wpt
+/internal/js/tc39/TestTC39
+/internal/js/modules/k6/experimental/streams/tests/wpt
 
 .vscode
 *.sublime-workspace
